@@ -19,29 +19,11 @@ services:
   backend:
     container_name: conduit-backend
     restart: unless-stopped
-    build:
-      context: ./conduit-backend
-      dockerfile: backend.Dockerfile
+    image: ghcr.io/${REPOSITORY_OWNER}/conduit-container/backend:latest
     ports:
       - "8000:8000"
     depends_on:
       - db
-    environment:
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
-      DJANGO_LOGLEVEL: ${DJANGO_LOGLEVEL}
-      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS}
-
-      DATABASE_ENGINE: ${DATABASE_ENGINE}
-      DATABASE_NAME: ${DATABASE_NAME}
-      DATABASE_USERNAME: ${DATABASE_USERNAME}
-      DATABASE_PASSWORD: ${DATABASE_PASSWORD}
-      DATABASE_HOST: ${DATABASE_HOST}
-      DATABASE_PORT: ${DATABASE_PORT}
-
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
-      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS}
-      CORS_ALLOW_CREDENTIALS: ${CORS_ALLOW_CREDENTIALS}
-
     env_file:
       - .env
     labels:
@@ -52,13 +34,13 @@ services:
   frontend:
     container_name: conduit-frontend
     restart: unless-stopped
-    build:
-      context: ./conduit-frontend
-      dockerfile: frontend.Dockerfile
+    image: ghcr.io/${REPOSITORY_OWNER}/conduit-container/frontend:latest
     ports:
-      - "8282:8282"
+      - "8282:80"
     labels:
       service-role: "frontend"
+    networks:
+      - app_network
 
 volumes:
   postgres_data:

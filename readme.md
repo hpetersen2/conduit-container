@@ -20,6 +20,16 @@ The main goal of this project is to consolidate knowledge in containerization, n
   - [Running Django Management Commands](#running-django-management-commands)
   - [Rebuilding Containers](#rebuilding-containers)
 - [Architecture Overview](#architecture-overview)
+- [CI/CD Deployment](#cicd-deployment)
+  - [Overview](#overview-1)
+  - [Server Prerequisites](#server-prerequisites)
+  - [Optional: Clean Up GitHub Repository Tabs](#optional-clean-up-github-repository-tabs)
+  - [GitHub Secrets and Variables](#github-secrets-and-variables)
+  - [SSH Key Setup](#ssh-key-setup)
+  - [Configure the Deployment Branch](#configure-the-deployment-branch)
+  - [docker-compose.yml in Production](#docker-composeyml-in-production)
+  - [Triggering a Deployment](#triggering-a-deployment)
+  - [Rollback Behavior](#rollback-behavior)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -214,6 +224,147 @@ git pull --recurse-submodules
 * **Environment Variables**: Centralized configuration via `.env` file
 
 This setup mirrors real-world cloud deployments and encourages best practices in service isolation and network security.
+
+---
+
+## CI/CD Deployment
+
+### Overview
+
+The pipeline is defined in `.github/workflows/deployment.yaml` and runs automatically on every push to the `dev` branch. It consists of two jobs:
+
+1. **Build & Push Images** — builds the Angular frontend and Django backend as Docker images and pushes them to the GitHub Container Registry (ghcr.io).
+2. **Deploy Application** — connects to the remote server via SSH, pulls the new images, and restarts the stack using Docker Compose.
+
+### Server Prerequisites
+
+The remote server must have the following installed and running before the first deployment:
+
+* Docker Engine: [https://docs.docker.com/engine/install/](https://docs.docker.com/engine/install/)
+* Docker Compose Plugin (V2): [https://docs.docker.com/compose/install/](https://docs.docker.com/compose/install/)
+
+Verify after installation:
+```bash
+docker --version
+docker compose version
+```
+
+The project folder referenced by `PATH_TO_PROJECT_FOLDER` must exist on the server before the first deployment:
+```bash
+mkdir -p /path/to/your/project
+```
+
+### Optional: Clean Up GitHub Repository Tabs
+
+By default, GitHub enables several tabs (Issues, Projects, Wiki, etc.) that may not be needed for this project. To keep the repository tidy, unused tabs can be disabled under **Settings → General → Features**.
+
+### GitHub Secrets and Variables
+
+All sensitive configuration is stored as GitHub Actions Secrets and must be set before the first pipeline run. Open the repository on GitHub and navigate to **Settings → Secrets and variables → Actions**.
+
+Add the following **Secrets** (all values from `.env.template` plus the additional deployment secrets listed below):
+
+| Secret | Description |
+|---|---|
+| `BACKEND_API_URL` | Public URL of the backend API, e.g. `http://YOUR_SERVER_IP:8000/api` |
+| `DJANGO_SECRET_KEY` | Django secret key |
+| `DJANGO_LOGLEVEL` | Log level, e.g. `INFO` |
+| `DEBUG` | `False` in production |
+| `DJANGO_ALLOWED_HOSTS` | Comma-separated list of allowed hosts |
+| `CORS_ALLOWED_ORIGINS` | Allowed CORS origins |
+| `CSRF_TRUSTED_ORIGINS` | Trusted origins for CSRF |
+| `CORS_ALLOW_CREDENTIALS` | `True` or `False` |
+| `CORS_ORIGIN_WHITELIST` | CORS origin whitelist |
+| `DATABASE_ENGINE` | Django database engine, e.g. `django.db.backends.postgresql` |
+| `DATABASE_NAME` | Database name |
+| `DATABASE_USERNAME` | Database user |
+| `DATABASE_PASSWORD` | Database password |
+| `DATABASE_HOST` | Database host |
+| `DATABASE_PORT` | Database port |
+| `DJANGO_SUPERUSER_USERNAME` | Initial superuser username |
+| `DJANGO_SUPERUSER_EMAIL` | Initial superuser email |
+| `DJANGO_SUPERUSER_PASSWORD` | Initial superuser password |
+| `REMOTE_USER` | SSH user on the remote server, e.g. `ubuntu` |
+| `REMOTE_HOST` | IP address or hostname of the remote server |
+| `SSH_PRIVATE_KEY` | Private SSH key used to authenticate against the server (see [SSH Key Setup](#ssh-key-setup)) |
+
+Add the following **Variable** (under the Variables tab, not Secrets):
+
+| Variable | Description |
+|---|---|
+| `PATH_TO_PROJECT_FOLDER` | Absolute path to the project folder on the server, e.g. `/home/ubuntu/conduit-container` |
+
+### SSH Key Setup
+
+The pipeline authenticates against the remote server using an SSH key pair. To generate the key pair directly on the server:
+
+```bash
+ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/github_actions
+```
+
+This creates two files:
+
+* `~/.ssh/github_actions` — the **private key**
+* `~/.ssh/github_actions.pub` — the **public key**
+
+Add the public key to the server's list of authorized keys so the pipeline can log in:
+
+```bash
+cat ~/.ssh/github_actions.pub >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+```
+
+Then copy the contents of the private key:
+
+```bash
+cat ~/.ssh/github_actions
+```
+
+Paste the entire output (including the `-----BEGIN...` and `-----END...` lines) as the value of the `SSH_PRIVATE_KEY` secret in GitHub.
+
+### Configure the Deployment Branch
+
+The pipeline triggers on pushes to the `dev` branch. This is configured in `.github/workflows/deployment.yaml`:
+
+```yaml
+on:
+  push:
+    branches:
+      - dev
+```
+
+Change this value if your main working branch has a different name.
+
+### docker-compose.yml in Production
+
+In production the `docker-compose.yml` does not build images locally. Instead it pulls pre-built images from the GitHub Container Registry:
+
+```yaml
+image: ghcr.io/${REPOSITORY_OWNER}/conduit-container/frontend:latest
+```
+
+The `REPOSITORY_OWNER` variable is written into the `.env` file automatically by the pipeline — no manual action is required.
+
+### Triggering a Deployment
+
+A deployment starts automatically on every push to the `dev` branch:
+
+```bash
+git push origin dev
+```
+
+To monitor the pipeline, open the repository on GitHub and navigate to the **Actions** tab. Select the latest workflow run to view the logs for each step in real time.
+
+### Rollback Behavior
+
+If the deployment fails after the new containers have been started, the pipeline automatically attempts a rollback. It restores the previously running image tags and brings the stack back up with the last known working state.
+
+The rollback is triggered on any error during the deploy step (`trap rollback ERR`). If the rollback itself fails, the error is surfaced in the Actions log and the stack may be left in a stopped state — in that case, log into the server manually and run:
+
+```bash
+cd /path/to/your/project
+docker compose up -d
+```
 
 ---
 
